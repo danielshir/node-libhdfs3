@@ -36,7 +36,7 @@ fs.connect(options, function(err, success) {
           return console.log("Error while reading - " + err);
         }
 
-        console.log("Dumping last 4 bytes - " + buf);
+        console.log("Dumping last 4 bytes - " + buf.data.toString('ascii'));
       });
     });
 });
