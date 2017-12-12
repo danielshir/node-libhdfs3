@@ -32,15 +32,20 @@ class HDFile : public Nan::ObjectWrap {
 
     public:
         static NAN_METHOD(Read);
+        static NAN_METHOD(ReadBuffer);
     protected:
         static void UV_Read(uv_work_t* work_req);
         static void UV_AfterRead(uv_work_t* work_req, int status);
+        static void UV_ReadBuffer(uv_work_t* work_req);
+        static void UV_AfterReadBuffer(uv_work_t* work_req, int status);
 };
 
 struct read_work_data {
     Nan::Callback*      cb;
     HDFile*             file;
     tOffset             bytesRead;
+    tOffset             offset;
+    tOffset             size;
     int                 error;
     char*               buf;
 };

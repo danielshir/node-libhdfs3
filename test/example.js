@@ -23,7 +23,8 @@ var kerbTicketCachePath = undefined;                   // Set this to use kerber
 var options = {
     "nameNode": "hdfs://localhost:9000",
     "extra": {
-        "dfs.client.use.datanode.hostname": "true"
+        "dfs.client.use.datanode.hostname": "true",
+        "dfs.client.read.shortcircuit": "false"
     }
 };
 

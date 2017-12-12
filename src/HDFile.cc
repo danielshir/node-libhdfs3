@@ -71,6 +71,52 @@ NAN_METHOD(HDFile::Read) {
     info.GetReturnValue().Set(Nan::Undefined());
 }
 
+NAN_METHOD(HDFile::ReadBuffer) {
+    DEBUG("HDFile::ReadBuffer");
+
+    v8::Local<v8::Function> cb;
+    v8::Local<v8::Number> len;
+    v8::Local<v8::Number> offset;
+    HDFile*                 self = NODE_FILE();
+    uv_work_t*              work_req = (uv_work_t *) (calloc(1, sizeof(uv_work_t)));
+    read_work_data*         data = (read_work_data *) (calloc(1, sizeof(read_work_data)));
+
+    if (info.Length() != 3) {
+        return Nan::ThrowError("HDFile::ReadBuffer: requires 3 arguments. ");
+    }
+    if (!info[0]->IsNumber()) {
+        return Nan::ThrowTypeError("HDFile::ReadBuffer: first argument offset must be a number. ");
+    }
+    if (!info[1]->IsNumber()) {
+        return Nan::ThrowTypeError("HDFile::ReadBuffer: second argument len must be a number. ");
+    }
+    if (!info[2]->IsFunction()) {
+        return Nan::ThrowTypeError("HDFile::ReadBuffer: third argument cb must be a function. ");
+    }
+
+    offset = v8::Local<v8::Number>::Cast(info[0]);
+    len = v8::Local<v8::Number>::Cast(info[1]);
+    cb = v8::Local<v8::Function>::Cast(info[2]);
+
+    data->file = self;
+    data->bytesRead = 0;
+    data->buf = new char[len->IntegerValue()];
+    data->size = len->IntegerValue();
+    data->offset = offset->IntegerValue();
+    data->cb = new Nan::Callback(cb);
+
+    work_req->data = data;
+
+    uv_queue_work(
+        uv_default_loop(),
+        work_req,
+        UV_ReadBuffer,
+        (uv_after_work_cb)UV_AfterReadBuffer);
+
+    self->Ref();
+    info.GetReturnValue().Set(Nan::Undefined());
+}
+
 void HDFile::UV_Read(uv_work_t* req) {
     DEBUG("HDFile::UV_Read");
 
@@ -110,6 +156,52 @@ void HDFile::UV_Read(uv_work_t* req) {
 
 }
 
+void HDFile::UV_ReadBuffer(uv_work_t* req) {
+    DEBUG("HDFile::UV_ReadBuffer");
+
+    read_work_data* data = (read_work_data*)(req->data);
+
+    if (!data->file->handle || !hdfsFileIsOpenForRead(data->file->handle)) {
+        DEBUG("Opening file...");
+        data->file->handle = hdfsOpenFile(data->file->fileSystem, data->file->path, O_RDONLY, 0, 0, 0);
+        if (data->file->handle == NULL) {
+            data->error = errno;
+            return;
+        }
+    }
+
+    DEBUG("Starting read file operation...");
+    std::vector<char> buf(data->size);
+
+    if (data->offset != 0) {
+        DEBUG("Seeking into position");
+        if (hdfsSeek(data->file->fileSystem, data->file->handle, data->offset)) {
+            data->error = errno;
+            return;
+        }
+    }
+
+    DEBUG("Reading file data");
+    data->bytesRead = hdfsRead(data->file->fileSystem,
+        data->file->handle,
+        &buf[0],
+        data->size);
+
+    if (data->bytesRead == -1) {
+        data->error = errno;
+        return;        
+    }
+
+    std::copy(buf.begin(), buf.end(), data->buf);
+
+    if (data->bytesRead == 0) {
+        // end of file, close file
+        DEBUG("Closing file due to EOF");
+        hdfsCloseFile(data->file->fileSystem, data->file->handle);
+        data->file->handle = NULL;
+    }
+}
+
 void HDFile::UV_AfterRead(uv_work_t* req, int status) {
     DEBUG("HDFile::UV_AfterRead");
     Nan::HandleScope        scope;
@@ -135,6 +227,36 @@ void HDFile::UV_AfterRead(uv_work_t* req, int status) {
 
     data->file->Unref();
 
+    data->cb->Call(2, info);
+
+    delete data->cb;
+    free(data);
+    free(req);
+}
+
+void HDFile::UV_AfterReadBuffer(uv_work_t* req, int status) {
+    DEBUG("HDFile::UV_AfterReadBuffer");
+    Nan::HandleScope        scope;
+    v8::Local<v8::Value>    info[2];
+    v8::Local<v8::Object>   readInfo = Nan::New<v8::Object>();
+    read_work_data*         data = (read_work_data*)(req->data);
+
+    if (data->error) {
+        info[0] = Nan::ErrnoException(data->error);
+        info[1] = Nan::Null();
+    }
+    else {
+        readInfo->Set(V8_STRING("data"), Nan::NewBuffer(data->buf, 
+            data->bytesRead,
+            buffer_delete_callback,
+            &data->buf).ToLocalChecked());
+        readInfo->Set(V8_STRING("bytesRead"), Nan::New<v8::Number>(data->bytesRead));
+
+        info[0] = Nan::Null();
+        info[1] = readInfo;
+    }
+
+    data->file->Unref();
     data->cb->Call(2, info);
 
     delete data->cb;

@@ -38,6 +38,7 @@ NAN_MODULE_INIT(InitAddon) {
 
   // File System Functions
   Nan::SetPrototypeMethod(fileTemplate, "read", HDFile::Read);
+  Nan::SetPrototypeMethod(fileTemplate, "readBuffer", HDFile::ReadBuffer);
 
   Nan::Set(target,
       Nan::New("File").ToLocalChecked(), Nan::GetFunction(fileTemplate).ToLocalChecked());
